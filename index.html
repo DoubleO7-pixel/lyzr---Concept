@@ -1,0 +1,588 @@
+<title>Agent Run Trace</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: concept intro, then one app frame (run queue | trace with decision on top | step detail), then framing and tradeoffs. */
+:root{
+  --bg:#f2f3f1; --surface:#ffffff; --sunk:#f7f8f6; --ink:#171a18; --muted:#5d6560; --faint:#8a918c; --line:#dfe2de;
+  --accent:#0e6b62; --accent-soft:#e2f1ee;
+  --ok:#23794a; --ok-soft:#e4f3ea; --warn:#9a5b00; --warn-soft:#fbf0dc; --crit:#b3362c; --crit-soft:#fbe8e5; --info:#3b5bab; --info-soft:#e8edf9;
+  --f-sans:"Geist", "Segoe UI", system-ui, sans-serif;
+  --f-mono:"Geist Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#101312; --surface:#171b19; --sunk:#131715; --ink:#e7ebe8; --muted:#9aa39e; --faint:#6f7873; --line:#29302c;
+  --accent:#5cc7b8; --accent-soft:#16302c;
+  --ok:#6cd097; --ok-soft:#14291c; --warn:#e8ab4c; --warn-soft:#2e2411; --crit:#f0877c; --crit-soft:#361a18; --info:#94acef; --info-soft:#1b2440; color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --bg:#101312; --surface:#171b19; --sunk:#131715; --ink:#e7ebe8; --muted:#9aa39e; --faint:#6f7873; --line:#29302c;
+  --accent:#5cc7b8; --accent-soft:#16302c;
+  --ok:#6cd097; --ok-soft:#14291c; --warn:#e8ab4c; --warn-soft:#2e2411; --crit:#f0877c; --crit-soft:#361a18; --info:#94acef; --info-soft:#1b2440; color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-sans);font-size:14.5px;line-height:1.5;padding:0 16px}
+.wrap{max-width:1280px;margin:0 auto;padding-block:36px 56px;display:flex;flex-direction:column;gap:28px}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.mono{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+.eyebrow{font-family:var(--f-mono);font-size:11.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);margin:0}
+
+/* intro */
+.intro{display:flex;flex-wrap:wrap;gap:20px;justify-content:space-between;align-items:flex-end}
+.intro-text{max-width:720px;min-width:0}
+h1{font-size:clamp(28px,4vw,42px);line-height:1.08;letter-spacing:-.025em;font-weight:700;margin:8px 0 12px;text-wrap:balance}
+.lede{margin:0;color:var(--muted);max-width:64ch;font-size:15.5px}
+.intro-meta{display:flex;flex-direction:column;gap:10px;align-items:flex-start}
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:8px 14px;font-weight:500;font-size:14px}
+.btn:hover{border-color:var(--faint)}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:var(--surface)}
+.btn-primary:hover{filter:brightness(1.07);border-color:var(--accent)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--surface)}
+.seg button{border:0;background:transparent;padding:6px 12px;font-size:13px;font-weight:500;color:var(--muted)}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--surface)}
+
+/* app frame */
+.app{background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;display:flex;flex-direction:column;min-width:0}
+.appbar{display:flex;flex-wrap:wrap;gap:10px 16px;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--sunk)}
+.crumbs{font-size:13px;color:var(--muted);display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.crumbs b{color:var(--ink);font-weight:600}
+.grid{display:grid;grid-template-columns:230px minmax(0,1fr) 340px;min-height:640px}
+@media (max-width:1100px){.grid{grid-template-columns:200px minmax(0,1fr)}.detail{grid-column:1/-1;border-left:0;border-top:1px solid var(--line)}}
+@media (max-width:760px){.grid{grid-template-columns:minmax(0,1fr)}.queue{border-right:0;border-bottom:1px solid var(--line)}}
+
+/* queue */
+.queue{border-right:1px solid var(--line);padding:12px 10px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.queue h3{margin:2px 6px 6px;font-size:12px;font-weight:600;color:var(--muted)}
+.qitem{display:grid;grid-template-columns:1fr auto;gap:2px 8px;text-align:left;border:1px solid transparent;background:transparent;border-radius:9px;padding:8px 10px;width:100%}
+.qitem:hover{background:var(--sunk)}
+.qitem[aria-current="true"]{background:var(--accent-soft);border-color:var(--accent)}
+.qitem .id{font-family:var(--f-mono);font-size:12.5px;font-weight:500}
+.qitem .amt{font-family:var(--f-mono);font-size:12.5px;text-align:right}
+.qitem .sub{font-size:12px;color:var(--muted);grid-column:1/-1;display:flex;gap:6px;align-items:center}
+.dot{width:7px;height:7px;border-radius:50%;flex:none;background:var(--faint)}
+.dot.ok{background:var(--ok)} .dot.warn{background:var(--warn)} .dot.crit{background:var(--crit)} .dot.info{background:var(--info)}
+.qnote{font-size:12px;color:var(--muted);margin:8px 6px 0}
+
+/* main */
+.main{padding:18px 20px 22px;display:flex;flex-direction:column;gap:16px;min-width:0}
+.runhead{display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px 16px;align-items:flex-start}
+.runhead h2{margin:0;font-size:20px;letter-spacing:-.01em;font-weight:600}
+.runhead .who{font-size:13px;color:var(--muted);margin-top:2px}
+.pill{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:3px 10px;font-size:12.5px;font-weight:500;white-space:nowrap}
+.pill::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.pill.warn{background:var(--warn-soft);color:var(--warn)} .pill.ok{background:var(--ok-soft);color:var(--ok)} .pill.info{background:var(--info-soft);color:var(--info)}
+.stats{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:12.5px;color:var(--muted)}
+.stats b{font-family:var(--f-mono);font-weight:500;color:var(--ink)}
+.stats .low b{color:var(--warn)}
+
+/* decision card */
+.decision{border:1px solid var(--warn);background:var(--warn-soft);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+.decision.done{border-color:var(--ok);background:var(--ok-soft)}
+.decision.busy{border-color:var(--info);background:var(--info-soft)}
+.decision h3{margin:0;font-size:15.5px;font-weight:600;line-height:1.35}
+.reasons{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:4px;font-size:13.5px}
+.reasons li{display:flex;gap:8px;align-items:baseline}
+.reasons li::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--warn);flex:none;transform:translateY(-2px)}
+.linkish{background:none;border:0;padding:0;color:var(--accent);font-weight:500;text-decoration:underline;text-underline-offset:2px}
+.actions{display:flex;flex-wrap:wrap;gap:8px}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:10px}
+.lines{display:flex;flex-direction:column;gap:4px}
+.line{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;font-size:13.5px;padding:4px 2px}
+.line input{width:16px;height:16px;accent-color:var(--accent)}
+.line .flag{font-size:11.5px;color:var(--warn);font-family:var(--f-mono)}
+.line.off span:not(.flag){color:var(--faint);text-decoration:line-through}
+.totals{border-top:1px dashed var(--line);padding-top:8px;display:grid;grid-template-columns:1fr auto;gap:2px 10px;font-size:13px}
+.totals .big{font-weight:600;font-size:14.5px}
+.field{display:flex;flex-direction:column;gap:4px;font-size:13px}
+.field label{font-weight:500}
+.field select,.field textarea,.field input{border:1px solid var(--line);background:var(--sunk);border-radius:8px;padding:7px 9px}
+.field textarea{resize:vertical;min-height:60px}
+.hint{font-size:12px;color:var(--muted);margin:0}
+.evalchip{display:inline-flex;gap:6px;align-items:center;align-self:flex-start;border:1px solid var(--accent);color:var(--accent);background:var(--surface);border-radius:999px;padding:2px 10px;font-size:12px;font-family:var(--f-mono)}
+
+/* trace */
+.trace-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap}
+.trace-head h3{margin:0;font-size:13px;font-weight:600}
+.trace-head span{font-size:12px;color:var(--muted)}
+.trace{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;position:relative}
+.trace::before{content:"";position:absolute;left:15px;top:14px;bottom:14px;width:1.5px;background:var(--line)}
+.step{position:relative}
+.step>button{display:grid;grid-template-columns:32px minmax(0,1fr) auto;gap:10px;width:100%;text-align:left;background:transparent;border:1px solid transparent;border-radius:10px;padding:9px 10px 9px 0;align-items:start}
+.step>button:hover{background:var(--sunk)}
+.step[aria-selected="true"]>button{background:var(--sunk);border-color:var(--line)}
+.node{width:32px;display:grid;place-items:center;padding-top:2px}
+.node i{width:13px;height:13px;border-radius:50%;background:var(--surface);border:2px solid var(--ok);display:block}
+.step.flag .node i{border-color:var(--warn);background:var(--warn)}
+.step.paused .node i{border-color:var(--warn);border-style:dashed}
+.step.running .node i{border-color:var(--info);border-top-color:transparent;animation:spin .8s linear infinite}
+.step.human .node i{border-color:var(--accent);background:var(--accent)}
+.step.superseded{opacity:.55}
+@keyframes spin{to{transform:rotate(360deg)}}
+.s-body{min-width:0;display:flex;flex-direction:column;gap:3px}
+.s-top{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.s-name{font-weight:600;font-size:14px}
+.kind{font-family:var(--f-mono);font-size:10.5px;letter-spacing:.04em;text-transform:uppercase;border:1px solid var(--line);border-radius:4px;padding:0 5px;color:var(--muted)}
+.s-agent{font-size:12px;color:var(--muted)}
+.s-sum{font-size:13.5px;color:var(--ink)}
+.s-guard{font-size:12px;color:var(--info);display:flex;gap:6px;align-items:center}
+.s-guard::before{content:"◆";font-size:9px}
+.s-meta{font-family:var(--f-mono);font-size:11.5px;color:var(--muted);display:flex;flex-wrap:wrap;gap:4px 12px}
+.s-right{display:flex;flex-direction:column;align-items:flex-end;gap:4px;font-size:12px}
+.conf{display:inline-flex;align-items:center;gap:6px;font-family:var(--f-mono);font-size:11.5px;white-space:nowrap}
+.conf .bar{width:44px;height:5px;border-radius:3px;background:var(--line);overflow:hidden}
+.conf .bar span{display:block;height:100%}
+.conf.hi .bar span{background:var(--ok)} .conf.md .bar span{background:var(--warn)} .conf.lo .bar span{background:var(--crit)}
+.conf.hi{color:var(--ok)} .conf.md{color:var(--warn)} .conf.lo{color:var(--crit)}
+.conf.na{color:var(--muted)}
+.dur{font-family:var(--f-mono);color:var(--faint)}
+.new{animation:fadein .4s ease}
+@keyframes fadein{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+
+/* audit */
+.audit{border-top:1px solid var(--line);padding-top:12px;display:flex;flex-direction:column;gap:6px}
+.audit h3{margin:0;font-size:13px;font-weight:600}
+.audit ol{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px;font-size:13px}
+.audit li{display:grid;grid-template-columns:64px minmax(0,1fr);gap:10px}
+.audit time{font-family:var(--f-mono);font-size:12px;color:var(--faint)}
+
+/* detail */
+.detail{border-left:1px solid var(--line);padding:18px 18px 22px;display:flex;flex-direction:column;gap:14px;background:var(--sunk);min-width:0}
+.detail h3{margin:0;font-size:16px;font-weight:600;line-height:1.3}
+.dsec{display:flex;flex-direction:column;gap:6px}
+.dsec h4{margin:0;font-family:var(--f-mono);font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);font-weight:500}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:13px;margin:0}
+.kv dt{color:var(--muted)} .kv dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.why{font-size:13.5px;margin:0}
+.photos{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.photo{aspect-ratio:4/3;max-width:100%;border-radius:8px;border:1px solid var(--line);background:repeating-linear-gradient(135deg,var(--surface) 0 8px,var(--sunk) 8px 16px);display:flex;flex-direction:column;justify-content:flex-end;padding:6px 8px;font-size:11.5px;color:var(--muted)}
+.photo b{color:var(--ink);font-weight:500;font-size:12px}
+.photo.flag{border-color:var(--warn);box-shadow:inset 0 0 0 1px var(--warn)}
+.photo.flag em{color:var(--warn);font-style:normal}
+pre.raw{margin:0;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px;font-family:var(--f-mono);font-size:11.5px;line-height:1.5;overflow-x:auto;white-space:pre}
+.quote{margin:0;border-left:2px solid var(--accent);padding:2px 0 2px 10px;font-size:13px;color:var(--muted)}
+
+/* notes */
+.notes{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px;border-top:1px solid var(--line);padding-top:28px}
+@media (max-width:860px){.notes{grid-template-columns:minmax(0,1fr)}}
+.notes h2{font-size:24px;letter-spacing:-.015em;margin:6px 0 14px;font-weight:650;text-wrap:balance}
+.frame{margin:0 0 18px;font-size:15px;max-width:62ch}
+.dl{margin:0;display:flex;flex-direction:column;gap:14px}
+.dl dt{font-weight:600;font-size:14.5px}
+.dl dd{margin:3px 0 0;color:var(--muted);font-size:14px;max-width:62ch}
+.dl dd b{color:var(--ink);font-weight:500}
+.foot{border-top:1px solid var(--line);padding-top:18px;font-size:12.5px;color:var(--muted);display:flex;flex-wrap:wrap;gap:6px 18px;justify-content:space-between}
+.foot a{color:var(--accent)}
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translate(-50%,160%);background:var(--ink);color:var(--surface);padding:10px 16px;border-radius:10px;font-size:13.5px;transition:transform .3s ease;max-width:calc(100% - 32px);z-index:5}
+.toast.show{transform:translate(-50%,0)}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+</style>
+
+<div class="wrap">
+  <header class="intro">
+    <div class="intro-text">
+      <p class="eyebrow">Unsolicited concept · Agent supervision</p>
+      <h1>An agent paused a $4,180 claim. Can the reviewer trust it in under a minute?</h1>
+      <p class="lede">A run trace for a claims triage agent. It opens with what the agent wants to do and why it stopped, then shows each step as evidence, with confidence per step. The reviewer can approve, correct the payout, or send the agent back to re-check one step. Every correction is saved as a test case for the next agent version.</p>
+    </div>
+    <div class="intro-meta">
+      <button class="btn" id="reset" type="button">Restart demo</button>
+      <span class="eyebrow">Nikhil Raj Bairy · Sept 2026</span>
+    </div>
+  </header>
+
+  <section class="app" aria-label="Agent run trace prototype">
+    <div class="appbar">
+      <div class="crumbs"><span>Claims Triage Agent v3.2</span><span>›</span><span>Runs</span><span>›</span><b class="mono">CLM-20418</b></div>
+      <div class="seg" role="group" aria-label="Who is reading">
+        <button type="button" data-view="reviewer" aria-pressed="true">Reviewer view</button>
+        <button type="button" data-view="builder" aria-pressed="false">Builder view</button>
+      </div>
+    </div>
+    <div class="grid">
+      <nav class="queue" aria-label="Runs">
+        <h3>Today · 5 runs</h3>
+        <div id="queue"></div>
+        <p class="qnote">Only CLM-20418 is interactive in this concept.</p>
+      </nav>
+
+      <div class="main">
+        <div class="runhead">
+          <div>
+            <h2>Motor claim · Rear-end collision</h2>
+            <div class="who">Policyholder A. Mehta · 2021 Honda Civic · filed Sep 26, 6:42 PM</div>
+          </div>
+          <span id="status"></span>
+        </div>
+        <div class="stats" id="stats"></div>
+        <div id="decision"></div>
+        <div class="trace-head"><h3>What the agent did</h3><span id="traceHint">Select a step to see its evidence</span></div>
+        <ol class="trace" id="trace"></ol>
+        <div class="audit">
+          <h3>Audit log</h3>
+          <ol id="audit"></ol>
+        </div>
+      </div>
+
+      <aside class="detail" id="detail" aria-live="polite"></aside>
+    </div>
+  </section>
+
+  <section class="notes">
+    <div>
+      <p class="eyebrow">Framing</p>
+      <h2>The trace isn't the product. The decision is.</h2>
+      <p class="frame">An enterprise agent run has two readers. A claims adjuster needs to decide in under a minute whether to trust this payout. An AI engineer needs to find why the agent stalled. Most trace views are built for the second reader and handed to the first. I designed for the adjuster first and put the engineer's detail one click away.</p>
+      <dl class="dl">
+        <dt>Lead with the outcome and why it paused</dt>
+        <dd>The top card says what the agent wants to do, which rules stopped it, and links to the exact step. <b>Tradeoff:</b> raw tool calls and tokens are hidden by default. The builder view brings them back without changing the layout.</dd>
+        <dt>Confidence is the weakest step, not an average</dt>
+        <dd>Four steps at 0.9+ and one at 0.62 would average to a comforting 0.88. A payout is only as sound as its weakest input, so the run shows the lowest step and points to it.</dd>
+        <dt>Three responses, not approve or reject</dt>
+        <dd>Approve, correct the amount, or ask the agent to re-check one step. Re-checking keeps the person directing the agent instead of redoing its work by hand, and only that step re-runs.</dd>
+        <dt>A correction needs a reason, and becomes a test case</dt>
+        <dd><b>Tradeoff:</b> this adds friction to overriding. Without it, an override teaches the system nothing and can't be audited. With it, each correction becomes a test case for the next version of the agent.</dd>
+        <dt>Guardrails are visible where they fired</dt>
+        <dd>PII redaction and the approval rule show inline on their steps, so compliance can see the controls ran without opening a separate log.</dd>
+      </dl>
+    </div>
+    <div>
+      <p class="eyebrow">What I'd test next</p>
+      <h2>Where this could break</h2>
+      <dl class="dl">
+        <dt>Do reviewers read 0.62, or just the colour?</dt>
+        <dd>I show both the number and a label. I'd test whether adjusters act differently at 0.62 and 0.74, and whether the number is calibrated enough to deserve two decimal places.</dd>
+        <dt>Longer runs and parallel agents</dt>
+        <dd>Six steps fit a list. A 200-step run with agents working in parallel needs grouping by agent and a collapsed "nothing unusual here" state, or the weak step gets buried.</dd>
+        <dt>Pause fatigue</dt>
+        <dd>If most runs pause, reviewers start approving without reading. I'd track how long a review takes and how often a pause ends in a change, and tune the thresholds from that.</dd>
+        <dt>Where this comes from</dt>
+        <dd>This extends my Activity Log case study, where I designed a log of every recruiter and candidate action for an HR platform. The question is the same one layer up: what happened, who did it, and can I trust it.</dd>
+      </dl>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <span>Unsolicited concept by Nikhil Raj Bairy, based on Lyzr's public website and job post. Not affiliated with Lyzr. The claim, people, agent and numbers are fictional.</span>
+    <a href="https://nikhilraj.framer.website" target="_blank" rel="noopener">nikhilraj.framer.website</a>
+  </footer>
+</div>
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+(function(){
+  const RM = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const $ = id => document.getElementById(id);
+  const wait = ms => new Promise(r => setTimeout(r, RM ? 0 : ms));
+  const money = n => '$' + n.toLocaleString('en-US');
+  const LIMIT = 2500, THRESH = 0.75, DEDUCT = 500;
+
+  const QUEUE = [
+    {id:'CLM-20418', type:'Motor', st:'Needs review', dot:'warn', amt:4180, live:true},
+    {id:'CLM-20411', type:'Motor', st:'Auto-approved', dot:'ok', amt:1240},
+    {id:'CLM-20409', type:'Home', st:'Needs review', dot:'warn', amt:12900},
+    {id:'CLM-20402', type:'Motor', st:'Failed · tool timeout', dot:'crit', amt:null},
+    {id:'CLM-20397', type:'Travel', st:'Auto-approved', dot:'ok', amt:380}
+  ];
+
+  function baseSteps(){
+    return [
+      {id:'1', name:'Read the claim form', agent:'Intake agent', kind:'Tool', tool:'document-parser', dur:3.1, conf:0.97, tok:[1840,210], cost:0.004,
+        sum:'Pulled the policy number, date of loss, vehicle and incident description.',
+        guard:'PII redacted: phone number, driver licence number',
+        out:[['Policy','MTR-88-20417'],['Date of loss','Sep 26, 2026'],['Vehicle','2021 Honda Civic'],['Incident','Rear-ended while stopped at a signal']],
+        why:'Every field was found in a labelled box on the form. No handwriting was involved.',
+        raw:'{\n  "policy_id": "MTR-88-20417",\n  "loss_date": "2026-09-26",\n  "vehicle": "2021 Honda Civic",\n  "phone": "[REDACTED]",\n  "licence_no": "[REDACTED]"\n}'},
+      {id:'2', name:'Check policy coverage', agent:'Policy agent', kind:'Tool', tool:'policy-api GET /policies/MTR-88-20417', dur:1.2, conf:0.99, tok:[0,0], cost:0.001,
+        sum:'Comprehensive cover is active. Rear collision is covered. Deductible is $500.',
+        out:[['Cover','Comprehensive, active'],['Valid until','Mar 14, 2027'],['Deductible','$500'],['Auto-approve limit','$2,500']],
+        why:'Read directly from the policy system. Nothing is inferred.',
+        raw:'{\n  "status": "active",\n  "plan": "comprehensive",\n  "deductible": 500,\n  "auto_approve_limit": 2500\n}'},
+      {id:'3', name:'Screen for fraud signals', agent:'Fraud agent', kind:'Model', tool:'fraud-scorer v7', dur:2.4, conf:0.91, tok:[0,0], cost:0.003,
+        sum:'Low risk. No claims in the last 24 months, and the photo location matches the reported address.',
+        out:[['Risk score','0.08 (low)'],['Prior claims','0 in 24 months'],['Photo location','Matches report']],
+        why:'Scores like this were right 91% of the time on last quarter\'s reviewed claims.',
+        raw:'{\n  "risk_score": 0.08,\n  "signals": ["no_prior_claims", "geo_match"],\n  "model": "fraud-scorer-v7"\n}'},
+      {id:'4', name:'Assess damage from photos and quote', agent:'Damage agent', kind:'LLM', tool:'vision model + repair price table', dur:18.6, conf:0.62, tok:[9420,1130], cost:0.061, flag:true,
+        sum:'Bumper and trunk lid damage match the garage quote. The $620 tail light line is not clearly visible in the photos.',
+        photos:true,
+        why:'Three of four quote lines match visible damage. The tail light only appears in photo 4, which is dark and at a low angle, so the agent could not confirm it.',
+        raw:'{\n  "matched_lines": ["bumper", "trunk_lid", "paint_labour"],\n  "unverified_lines": ["tail_light_left"],\n  "confidence": 0.62\n}'},
+      {id:'5', name:'Calculate payout', agent:'Payout agent', kind:'Tool', tool:'payout-calculator', dur:0.4, conf:null, tok:[0,0], cost:0,
+        sum:'$4,680 quote minus the $500 deductible comes to $4,180.',
+        out:[['Garage quote','$4,680'],['Deductible','−$500'],['Payout','$4,180']],
+        why:'Arithmetic, so there is no confidence score. It inherits whatever step 4 got wrong.',
+        raw:'{\n  "quote_total": 4680,\n  "deductible": 500,\n  "payout": 4180\n}'},
+      {id:'6', name:'Check approval rules', agent:'Guardrail', kind:'Rule', tool:'approval-policy v2', dur:0.1, conf:null, tok:[0,0], cost:0, paused:true,
+        sum:'', why:'Rules decide when a person must look. They do not judge the claim.',
+        raw:''}
+    ];
+  }
+  const LINES = [
+    {k:'bumper', label:'Rear bumper, replace', amt:1850},
+    {k:'trunk', label:'Trunk lid, repair', amt:1240},
+    {k:'paint', label:'Paint and labour', amt:970},
+    {k:'tail', label:'Left tail light assembly', amt:620, flag:true}
+  ];
+
+  let S, run = 0;
+  function init(){
+    run++;
+    S = {steps: baseSteps(), status:'paused', sel:'4', view:S ? S.view : 'reviewer', mode:null, rechecked:false,
+         lines: LINES.map(l => ({...l, on:true})), reason:'', note:'', payout:4180, evalId:null,
+         audit:[['6:43 PM','Run started by the claim intake queue.'],['6:43 PM','Paused at step 6 by approval rules. Assigned to you.']]};
+    renderAll();
+  }
+
+  /* ---------- derived ---------- */
+  function active(){ return S.steps.filter(s => !s.superseded); }
+  function lowest(){
+    const scored = active().filter(s => typeof s.conf === 'number');
+    return scored.reduce((a,b) => (b.conf < a.conf ? b : a), scored[0]);
+  }
+  function reasons(){
+    const r = [];
+    if (S.payout > LIMIT) r.push({text:'Payout of ' + money(S.payout) + ' is above the ' + money(LIMIT) + ' auto-approve limit.'});
+    const low = active().filter(s => typeof s.conf === 'number' && s.conf < THRESH);
+    low.forEach(s => r.push({text:'Step ' + s.id + ' (' + s.name.toLowerCase() + ') is at ' + s.conf.toFixed(2) + ', below the ' + THRESH + ' threshold.', step:s.id}));
+    return r;
+  }
+  function confClass(c){ return c == null ? 'na' : c >= 0.85 ? 'hi' : c >= 0.6 ? 'md' : 'lo'; }
+  function confLabel(c){ return c == null ? 'n/a' : (c >= 0.85 ? 'High' : c >= 0.6 ? 'Medium' : 'Low'); }
+  function confHTML(c, det){
+    if (c == null) return '<span class="conf na">' + (det ? 'Deterministic' : 'Rule') + '</span>';
+    return '<span class="conf ' + confClass(c) + '"><span class="bar"><span style="width:' + Math.round(c*100) + '%"></span></span>' + c.toFixed(2) + ' ' + confLabel(c) + '</span>';
+  }
+  function quoteTotal(){ return S.lines.filter(l => l.on).reduce((a,l) => a + l.amt, 0); }
+
+  /* ---------- render ---------- */
+  function renderQueue(){
+    const q = $('queue'); q.innerHTML = '';
+    QUEUE.forEach(r => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'qitem';
+      if (r.live) b.setAttribute('aria-current','true');
+      let st = r.st, dot = r.dot, amt = r.amt;
+      if (r.live) {
+        if (S.status === 'approved') { st = 'Approved by you'; dot = 'ok'; }
+        else if (S.status === 'corrected') { st = 'Corrected by you'; dot = 'ok'; }
+        else if (S.status === 'rechecking') { st = 'Agent re-checking'; dot = 'info'; }
+        amt = S.payout;
+      }
+      b.innerHTML = '<span class="id">' + r.id + '</span><span class="amt">' + (amt == null ? '—' : money(amt)) + '</span>' +
+        '<span class="sub"><span class="dot ' + dot + '"></span>' + r.type + ' · ' + st + '</span>';
+      if (!r.live) b.addEventListener('click', () => toast('Sample row. Only CLM-20418 is interactive in this concept.'));
+      q.appendChild(b);
+    });
+  }
+
+  function renderHead(){
+    const map = {paused:['warn','Waiting for you'], rechecking:['info','Agent re-checking step 4'], approved:['ok','Completed · approved'], corrected:['ok','Completed · corrected']};
+    const [c, t] = map[S.status];
+    $('status').innerHTML = '<span class="pill ' + c + '">' + t + '</span>';
+    const act = active().filter(s => !s.human);
+    const dur = act.reduce((a,s) => a + (s.running ? 0 : s.dur), 0);
+    const cost = act.reduce((a,s) => a + s.cost, 0);
+    const lo = lowest();
+    let html = '<span>Steps <b>' + act.length + '</b></span><span>Run time <b>' + dur.toFixed(1) + 's</b></span>';
+    if (S.view === 'builder') html += '<span>Cost <b>$' + cost.toFixed(3) + '</b></span><span>Tokens <b>' + act.reduce((a,s) => a + s.tok[0] + s.tok[1], 0).toLocaleString('en-US') + '</b></span>';
+    html += '<span class="' + (lo.conf < THRESH ? 'low' : '') + '">Weakest step <b>' + lo.id + ' · ' + lo.conf.toFixed(2) + '</b></span>';
+    $('stats').innerHTML = html;
+  }
+
+  function renderDecision(){
+    const d = $('decision');
+    const rs = reasons();
+    if (S.status === 'approved' || S.status === 'corrected') {
+      d.innerHTML = '<div class="decision done"><h3>' + (S.status === 'approved' ? 'You approved a payout of ' + money(S.payout) + '.' : 'You corrected the payout to ' + money(S.payout) + '.') + '</h3>' +
+        '<p class="hint" style="color:var(--ink)">The payment request went to finance. The full trace and your decision are in the audit log.</p>' +
+        (S.evalId ? '<span class="evalchip">Saved as test case ' + S.evalId + ' for v3.3</span>' : '') + '</div>';
+      return;
+    }
+    if (S.status === 'rechecking') {
+      d.innerHTML = '<div class="decision busy"><h3>The agent is re-checking step 4 with your instruction.</h3><p class="hint" style="color:var(--ink)">Only this step and the steps after it re-run. Steps 1–3 keep their results.</p></div>';
+      return;
+    }
+    let h = '<div class="decision"><h3>The agent recommends paying ' + money(S.payout) + '. It paused because:</h3><ul class="reasons">';
+    rs.forEach(r => { h += '<li><span>' + r.text + (r.step ? ' <button class="linkish" type="button" data-go="' + r.step + '">See step ' + r.step + '</button>' : '') + '</span></li>'; });
+    h += '</ul>';
+    if (!S.mode) {
+      h += '<div class="actions"><button class="btn btn-primary" type="button" id="aApprove">Approve ' + money(S.payout) + '</button>' +
+        '<button class="btn" type="button" id="aCorrect">Correct the amount</button>' +
+        (S.rechecked ? '' : '<button class="btn" type="button" id="aRecheck">Ask agent to re-check step 4</button>') + '</div>';
+    } else if (S.mode === 'correct') {
+      const qt = quoteTotal(), pay = Math.max(0, qt - DEDUCT);
+      h += '<div class="panel"><div class="lines">';
+      S.lines.forEach((l,i) => {
+        h += '<label class="line' + (l.on ? '' : ' off') + '" for="ln' + i + '"><input type="checkbox" id="ln' + i + '" data-line="' + i + '"' + (l.on ? ' checked' : '') + '>' +
+          '<span>' + l.label + (l.flag && !S.rechecked ? ' <span class="flag">· not confirmed in photos</span>' : '') + '</span><span class="mono">' + money(l.amt) + '</span></label>';
+      });
+      h += '</div><div class="totals"><span>Quote</span><span class="mono">' + money(qt) + '</span><span>Deductible</span><span class="mono">−' + money(DEDUCT) + '</span>' +
+        '<span class="big">New payout</span><span class="mono big">' + money(pay) + '</span></div>' +
+        '<div class="field"><label for="reason">Why are you changing it?</label><select id="reason"><option value="">Choose a reason</option>' +
+        ['Not supported by the evidence','Not covered by the policy','Pricing error in the quote','Other'].map(o => '<option' + (S.reason === o ? ' selected' : '') + '>' + o + '</option>').join('') + '</select></div>' +
+        '<div class="field"><label for="note">Note for the audit log (optional)</label><textarea id="note" placeholder="e.g. Tail light not visible in any photo">' + S.note + '</textarea></div>' +
+        '<p class="hint">Your correction and reason are saved as a test case, so the next agent version is checked against it.</p>' +
+        '<div class="actions"><button class="btn btn-primary" type="button" id="cSave"' + (S.reason && pay !== S.payout ? '' : ' disabled') + '>Save payout of ' + money(pay) + '</button><button class="btn" type="button" id="cCancel">Cancel</button></div></div>';
+    } else if (S.mode === 'recheck') {
+      h += '<div class="panel"><div class="field"><label for="instr">Tell the agent what to look at</label>' +
+        '<textarea id="instr">Open photo 4 at full resolution and check the left tail light for damage before confirming that quote line.</textarea></div>' +
+        '<p class="hint">Only step 4 and the steps after it re-run. Estimated time: about 20 seconds.</p>' +
+        '<div class="actions"><button class="btn btn-primary" type="button" id="rSend">Send to agent</button><button class="btn" type="button" id="rCancel">Cancel</button></div></div>';
+    }
+    h += '</div>';
+    d.innerHTML = h;
+    d.querySelectorAll('[data-go]').forEach(b => b.addEventListener('click', () => select(b.dataset.go)));
+    const on = (id, fn, ev) => { const el = $(id); if (el) el.addEventListener(ev || 'click', fn); };
+    on('aApprove', approve);
+    on('aCorrect', () => { S.mode = 'correct'; renderDecision(); });
+    on('aRecheck', () => { S.mode = 'recheck'; renderDecision(); });
+    on('cCancel', () => { S.mode = null; S.lines.forEach(l => l.on = true); S.reason = ''; S.note = ''; renderDecision(); });
+    on('rCancel', () => { S.mode = null; renderDecision(); });
+    on('cSave', saveCorrection);
+    on('rSend', recheck);
+    on('reason', e => { S.reason = e.target.value; renderDecision(); $('reason').focus(); }, 'change');
+    on('note', e => { S.note = e.target.value; }, 'input');
+    d.querySelectorAll('[data-line]').forEach(cb => cb.addEventListener('change', e => {
+      S.lines[+e.target.dataset.line].on = e.target.checked; renderDecision();
+      const again = d.querySelector('[data-line="' + e.target.dataset.line + '"]'); if (again) again.focus();
+    }));
+  }
+
+  function stepSummary(s){
+    if (s.id === '6') {
+      if (S.status === 'approved' || S.status === 'corrected') return 'Released after a person decided.';
+      const rs = reasons();
+      return rs.length ? 'Paused for a person: ' + rs.map(r => r.step ? 'step ' + r.step + ' confidence below ' + THRESH : 'payout above ' + money(LIMIT)).join(', and ') + '.' : 'All rules passed.';
+    }
+    return s.sum;
+  }
+
+  function renderTrace(){
+    const ol = $('trace'); ol.innerHTML = '';
+    S.steps.forEach(s => {
+      const li = document.createElement('li');
+      li.className = 'step' + (s.flag && !s.superseded ? ' flag' : '') + (s.id === '6' && S.status !== 'approved' && S.status !== 'corrected' ? ' paused' : '') +
+        (s.running ? ' running' : '') + (s.human ? ' human' : '') + (s.superseded ? ' superseded' : '') + (s.fresh ? ' new' : '');
+      s.fresh = false;
+      li.setAttribute('aria-selected', String(S.sel === s.id));
+      const b = document.createElement('button'); b.type = 'button';
+      let meta = '';
+      if (S.view === 'builder' && !s.human) {
+        meta = '<span class="s-meta"><span>' + s.tool + '</span>' + (s.tok[0] ? '<span>' + s.tok[0].toLocaleString('en-US') + ' in / ' + s.tok[1].toLocaleString('en-US') + ' out</span>' : '') +
+          '<span>$' + s.cost.toFixed(3) + '</span></span>';
+      }
+      b.innerHTML = '<span class="node"><i></i></span>' +
+        '<span class="s-body"><span class="s-top"><span class="s-name">' + s.id + ' · ' + s.name + '</span><span class="kind">' + s.kind + '</span></span>' +
+        '<span class="s-agent">' + s.agent + (s.superseded ? ' · replaced by step 4b' : '') + '</span>' +
+        '<span class="s-sum">' + (s.running ? 'Running…' : stepSummary(s)) + '</span>' +
+        (s.guard ? '<span class="s-guard">' + s.guard + '</span>' : '') + meta + '</span>' +
+        '<span class="s-right">' + (s.human || s.running ? '' : confHTML(s.conf, s.kind === 'Tool') ) + (s.running || s.human ? '' : '<span class="dur">' + s.dur.toFixed(1) + 's</span>') + '</span>';
+      b.addEventListener('click', () => select(s.id));
+      li.appendChild(b); ol.appendChild(li);
+    });
+  }
+
+  function renderDetail(){
+    const s = S.steps.find(x => x.id === S.sel) || S.steps[0];
+    let h = '<div><p class="eyebrow">Step ' + s.id + ' · ' + s.agent + '</p><h3>' + s.name + '</h3></div>';
+    if (s.human) {
+      h += '<div class="dsec"><h4>Decision</h4><dl class="kv">' + s.out.map(([k,v]) => '<dt>' + k + '</dt><dd>' + v + '</dd>').join('') + '</dl></div>';
+      $('detail').innerHTML = h; return;
+    }
+    if (s.running) { h += '<p class="why">Running with your instruction…</p>'; $('detail').innerHTML = h; return; }
+    h += '<div class="dsec"><h4>Confidence</h4>' + confHTML(s.conf, s.kind === 'Tool') + '<p class="why">' + s.why + '</p></div>';
+    if (s.instr) h += '<div class="dsec"><h4>Your instruction</h4><p class="quote">' + s.instr + '</p></div>';
+    if (s.photos) {
+      const confirmed = S.rechecked;
+      h += '<div class="dsec"><h4>Evidence · 4 photos</h4><div class="photos">' +
+        '<div class="photo"><b>1 · Rear, wide</b>Bumper and trunk lid</div>' +
+        '<div class="photo"><b>2 · Bumper close-up</b>Cracked, pushed in</div>' +
+        '<div class="photo"><b>3 · Trunk lid</b>Dent, paint damage</div>' +
+        '<div class="photo' + (confirmed ? '' : ' flag') + '"><b>4 · Rear left, low light</b>' + (confirmed ? 'Tail light crack confirmed at full resolution' : '<em>Tail light unclear</em>') + '</div></div></div>';
+      h += '<div class="dsec"><h4>Quote lines vs photos</h4><dl class="kv">' + LINES.map(l => '<dt>' + l.label + ' · ' + money(l.amt) + '</dt><dd>' + (l.flag && !confirmed ? '<span style="color:var(--warn)">Not confirmed</span>' : '<span style="color:var(--ok)">Matches</span>') + '</dd>').join('') + '</dl></div>';
+    }
+    if (s.id === '6') {
+      h += '<div class="dsec"><h4>Rules checked</h4><dl class="kv"><dt>Auto-approve limit</dt><dd>' + money(LIMIT) + ' · payout ' + money(S.payout) + '</dd><dt>Confidence threshold</dt><dd>' + THRESH + ' on every scored step · weakest ' + lowest().conf.toFixed(2) + '</dd></dl></div>';
+    }
+    if (s.out) h += '<div class="dsec"><h4>Output</h4><dl class="kv">' + s.out.map(([k,v]) => '<dt>' + k + '</dt><dd>' + v + '</dd>').join('') + '</dl></div>';
+    if (s.guard) h += '<div class="dsec"><h4>Guardrail</h4><p class="why" style="color:var(--info)">' + s.guard + '. Redacted before any model saw the text.</p></div>';
+    if (S.view === 'builder' && s.raw) {
+      h += '<div class="dsec"><h4>Raw output · ' + s.tool + '</h4><pre class="raw">' + s.raw.replace(/</g,'&lt;') + '</pre></div>' +
+        '<div class="dsec"><h4>Run data</h4><dl class="kv"><dt>Latency</dt><dd class="mono">' + s.dur.toFixed(1) + 's</dd><dt>Tokens</dt><dd class="mono">' + (s.tok[0] + s.tok[1]).toLocaleString('en-US') + '</dd><dt>Cost</dt><dd class="mono">$' + s.cost.toFixed(3) + '</dd></dl></div>';
+    } else if (S.view === 'reviewer' && s.raw) {
+      h += '<p class="hint">Switch to Builder view for the raw output, tokens and cost.</p>';
+    }
+    $('detail').innerHTML = h;
+  }
+
+  function renderAudit(){
+    $('audit').innerHTML = S.audit.slice().reverse().map(([t,x]) => '<li><time>' + t + '</time><span>' + x + '</span></li>').join('');
+  }
+  function renderAll(){ renderQueue(); renderHead(); renderDecision(); renderTrace(); renderDetail(); renderAudit(); }
+  function select(id){ S.sel = id; renderTrace(); renderDetail(); if (innerWidth < 1100) $('detail').scrollIntoView({behavior: RM ? 'auto' : 'smooth', block:'start'}); }
+
+  /* ---------- actions ---------- */
+  function finish(kind, extra){
+    S.status = kind; S.mode = null;
+    const out = [['Decision', kind === 'approved' ? 'Approved' : 'Corrected'], ['Payout', money(S.payout)], ['By', 'You · senior claims adjuster']];
+    if (extra) out.push(...extra);
+    S.steps.push({id:'7', name: kind === 'approved' ? 'Approved by a person' : 'Corrected by a person', agent:'You', kind:'Human', human:true, fresh:true, tok:[0,0], cost:0, dur:0, conf:null, out});
+    S.sel = '7';
+    renderAll();
+  }
+  function approve(){
+    S.audit.push(['6:51 PM', 'You approved a payout of ' + money(S.payout) + '.']);
+    finish('approved');
+    toast('Approved. Payment request sent to finance.');
+  }
+  function saveCorrection(){
+    const old = S.payout;
+    S.payout = Math.max(0, quoteTotal() - DEDUCT);
+    const removed = S.lines.filter(l => !l.on).map(l => l.label.toLowerCase()).join(', ');
+    S.evalId = 'EV-0311';
+    S.audit.push(['6:51 PM', 'You corrected the payout from ' + money(old) + ' to ' + money(S.payout) + '. Removed: ' + (removed || 'none') + '. Reason: ' + S.reason.toLowerCase() + (S.note ? ' (“' + S.note.replace(/</g,'&lt;') + '”)' : '') + '.']);
+    S.audit.push(['6:51 PM', 'Saved as test case ' + S.evalId + ' for Claims Triage Agent v3.3.']);
+    finish('corrected', [['Reason', S.reason], ['Removed', removed || 'none']]);
+    toast('Payout corrected and saved as a test case.');
+  }
+  async function recheck(){
+    const my = run;
+    const instr = ($('instr').value || '').trim() || 'Re-check the tail light in photo 4.';
+    S.mode = null; S.status = 'rechecking';
+    S.audit.push(['6:48 PM', 'You asked the agent to re-check step 4: “' + instr.replace(/</g,'&lt;') + '”']);
+    const s4 = S.steps.find(s => s.id === '4');
+    const idx = S.steps.indexOf(s4);
+    const s4b = {id:'4b', name:'Re-check the tail light', agent:'Damage agent', kind:'LLM', tool:'vision model (full resolution)', dur:0, conf:null, tok:[0,0], cost:0, running:true, fresh:true, instr:instr};
+    S.steps.splice(idx + 1, 0, s4b);
+    S.sel = '4b';
+    renderAll();
+    await wait(2200); if (my !== run) return;
+    s4.superseded = true;
+    Object.assign(s4b, {running:false, dur:14.2, conf:0.88, tok:[6210,540], cost:0.043, fresh:true,
+      sum:'Photo 4 at full resolution shows a cracked left tail light lens. All four quote lines now match the photos.',
+      why:'The crack is visible across 40+ pixels at full resolution. Low light still limits certainty, so this is high but not near 1.',
+      photos:true,
+      raw:'{\n  "matched_lines": ["bumper", "trunk_lid", "paint_labour", "tail_light_left"],\n  "unverified_lines": [],\n  "confidence": 0.88\n}'});
+    S.rechecked = true;
+    S.status = 'paused';
+    S.audit.push(['6:48 PM', 'Step 4b finished at 0.88. Steps 5–6 re-ran. Still paused: payout is above ' + money(LIMIT) + '.']);
+    renderAll();
+    toast('Re-check done. Only the amount rule is still holding the run.');
+  }
+
+  let tt;
+  function toast(m){ const t = $('toast'); t.textContent = m; t.classList.add('show'); clearTimeout(tt); tt = setTimeout(() => t.classList.remove('show'), 2600); }
+
+  document.querySelectorAll('[data-view]').forEach(b => b.addEventListener('click', () => {
+    S.view = b.dataset.view;
+    document.querySelectorAll('[data-view]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    renderHead(); renderTrace(); renderDetail();
+  }));
+  $('reset').addEventListener('click', () => { S.view = 'reviewer'; document.querySelectorAll('[data-view]').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.view === 'reviewer'))); init(); });
+  init();
+})();
+</script>
